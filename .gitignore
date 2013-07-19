@@ -2,6 +2,8 @@
 .project
 .pydevproject
 cmake_install.cmake
+CMakeLists.txt
+openslam_gmapping
 build/
 bin/
 lib/
