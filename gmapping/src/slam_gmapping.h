@@ -6,7 +6,7 @@
  * COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE"). THE WORK IS PROTECTED BY
  * COPYRIGHT AND/OR OTHER APPLICABLE LAW. ANY USE OF THE WORK OTHER THAN AS
  * AUTHORIZED UNDER THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.
- * 
+ *
  * BY EXERCISING ANY RIGHTS TO THE WORK PROVIDED HERE, YOU ACCEPT AND AGREE TO
  * BE BOUND BY THE TERMS OF THIS LICENSE. THE LICENSOR GRANTS YOU THE RIGHTS
  * CONTAINED HERE IN CONSIDERATION OF YOUR ACCEPTANCE OF SUCH TERMS AND
@@ -30,6 +30,9 @@
 
 #include <boost/thread.hpp>
 
+//TODO Cambiar para que se tome como parametro del nodo
+#define LASERS_NUM 2
+
 class SlamGMapping
 {
   public:
@@ -37,8 +40,15 @@ class SlamGMapping
     ~SlamGMapping();
 
     void publishTransform();
-  
-    void laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan);
+
+    //laserInd to distinguish the diferent lasers
+    void laserCallbackCommon(const sensor_msgs::LaserScan::ConstPtr& scan,int laserInd);
+
+    //For first laser. Calls laserCallbackCommon with laserInd = 0
+    void laserCallback0(const sensor_msgs::LaserScan::ConstPtr& scan);
+    //For second laser. Calls laserCallbackCommon with laserInd = 1
+
+    void laserCallback1(const sensor_msgs::LaserScan::ConstPtr& scan);
     bool mapCallback(nav_msgs::GetMap::Request  &req,
                      nav_msgs::GetMap::Response &res);
     void publishLoop(double transform_publish_period);
@@ -50,20 +60,20 @@ class SlamGMapping
     ros::Publisher sstm_;
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
-    message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
-    tf::MessageFilter<sensor_msgs::LaserScan>* scan_filter_;
+    message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_[LASERS_NUM];
+    tf::MessageFilter<sensor_msgs::LaserScan>* scan_filter_[LASERS_NUM];
     tf::TransformBroadcaster* tfB_;
 
     GMapping::GridSlamProcessor* gsp_;
-    GMapping::RangeSensor* gsp_laser_;
-    double gsp_laser_angle_increment_;
+    GMapping::RangeSensor* gsp_laser_[LASERS_NUM];
+    double gsp_laser_angle_increment_; //TODO uno para cada laser. Se calcula en initMapper??
     double angle_min_;
     double angle_max_;
     unsigned int gsp_laser_beam_count_;
     GMapping::OdometrySensor* gsp_odom_;
 
-    bool got_first_scan_;
-
+    bool got_first_scan_[LASERS_NUM];
+    bool gmapping_initialized_;  //to initialize gmapping only once
     bool got_map_;
     nav_msgs::GetMap::Response map_;
 
@@ -72,7 +82,7 @@ class SlamGMapping
     boost::mutex map_to_odom_mutex_;
     boost::mutex map_mutex_;
 
-    int laser_count_;
+    int laser_count_[LASERS_NUM];
     int throttle_scans_;
 
     boost::thread* transform_thread_;
@@ -82,16 +92,16 @@ class SlamGMapping
     std::string map_frame_;
     std::string odom_frame_;
 
-    void updateMap(const sensor_msgs::LaserScan& scan);
+    //It doesn't need nor use the last scan.
+    void updateMap();
     bool getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t);
-    bool initMapper(const sensor_msgs::LaserScan& scan);
-    bool addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose);
+    bool initMapper(const sensor_msgs::LaserScan& scan, int laserInd);
+    bool addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose, int laserInd);
     double computePoseEntropy();
-    
+
     // Parameters used by GMapping
     double maxRange_;
     double maxUrange_;
-    double maxrange_;
     double sigma_;
     int kernelSize_;
     double lstep_;
@@ -119,6 +129,6 @@ class SlamGMapping
     double llsamplestep_;
     double lasamplerange_;
     double lasamplestep_;
-    
+
     double tf_delay_;
 };
