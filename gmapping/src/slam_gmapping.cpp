@@ -6,7 +6,7 @@
  * COMMONS PUBLIC LICENSE ("CCPL" OR "LICENSE"). THE WORK IS PROTECTED BY
  * COPYRIGHT AND/OR OTHER APPLICABLE LAW. ANY USE OF THE WORK OTHER THAN AS
  * AUTHORIZED UNDER THIS LICENSE OR COPYRIGHT LAW IS PROHIBITED.
- * 
+ *
  * BY EXERCISING ANY RIGHTS TO THE WORK PROVIDED HERE, YOU ACCEPT AND AGREE TO
  * BE BOUND BY THE TERMS OF THIS LICENSE. THE LICENSOR GRANTS YOU THE RIGHTS
  * CONTAINED HERE IN CONSIDERATION OF YOUR ACCEPTANCE OF SUCH TERMS AND
@@ -35,7 +35,7 @@ written to a file using e.g.
 @section topic ROS topics
 
 Subscribes to (name/type):
-- @b "scan"/<a href="../../sensor_msgs/html/classstd__msgs_1_1LaserScan.html">sensor_msgs/LaserScan</a> : data from a laser range scanner 
+- @b "scan"/<a href="../../sensor_msgs/html/classstd__msgs_1_1LaserScan.html">sensor_msgs/LaserScan</a> : data from a laser range scanner
 - @b "/tf": odometry from the robot
 
 
@@ -144,83 +144,58 @@ SlamGMapping::SlamGMapping():
   ros::NodeHandle private_nh_("~");
 
   // Parameters used by our GMapping wrapper
-  if(!private_nh_.getParam("throttle_scans", throttle_scans_))
-    throttle_scans_ = 1;
-  if(!private_nh_.getParam("base_frame", base_frame_))
-    base_frame_ = "base_link";
-  if(!private_nh_.getParam("map_frame", map_frame_))
-    map_frame_ = "map";
-  if(!private_nh_.getParam("odom_frame", odom_frame_))
-    odom_frame_ = "odom";
+  private_nh_.param("map_update_interval", map_update_interval, 5.0);
+  private_nh_.param("throttle_scans", throttle_scans_, 1);
+  private_nh_.param<std::string>("base_frame", base_frame_, "base_link");
+  private_nh_.param<std::string>("map_frame",  map_frame_,  "map");
+  private_nh_.param<std::string>("odom_frame", odom_frame_, "odom");
+  private_nh_.param("transform_publish_period", transform_publish_period_, .05);
+  private_nh_.param("rng_seed", rng_seed_, int(time(NULL)));
 
-  double transform_publish_period;
-  private_nh_.param("transform_publish_period", transform_publish_period, 0.05);
-
-  double tmp;
-  if(!private_nh_.getParam("map_update_interval", tmp))
-    tmp = 5.0;
-  map_update_interval_.fromSec(tmp);
-  
   // Parameters used by GMapping itself
   maxUrange_ = 0.0;  maxRange_ = 0.0; // preliminary default, will be set in initMapper()
-  if(!private_nh_.getParam("sigma", sigma_))
-    sigma_ = 0.05;
-  if(!private_nh_.getParam("kernelSize", kernelSize_))
-    kernelSize_ = 1;
-  if(!private_nh_.getParam("lstep", lstep_))
-    lstep_ = 0.05;
-  if(!private_nh_.getParam("astep", astep_))
-    astep_ = 0.05;
-  if(!private_nh_.getParam("iterations", iterations_))
-    iterations_ = 5;
-  if(!private_nh_.getParam("lsigma", lsigma_))
-    lsigma_ = 0.075;
-  if(!private_nh_.getParam("ogain", ogain_))
-    ogain_ = 3.0;
-  if(!private_nh_.getParam("lskip", lskip_))
-    lskip_ = 0;
-  if(!private_nh_.getParam("srr", srr_))
-    srr_ = 0.1;
-  if(!private_nh_.getParam("srt", srt_))
-    srt_ = 0.2;
-  if(!private_nh_.getParam("str", str_))
-    str_ = 0.1;
-  if(!private_nh_.getParam("stt", stt_))
-    stt_ = 0.2;
-  if(!private_nh_.getParam("linearUpdate", linearUpdate_))
-    linearUpdate_ = 1.0;
-  if(!private_nh_.getParam("angularUpdate", angularUpdate_))
-    angularUpdate_ = 0.5;
-  if(!private_nh_.getParam("temporalUpdate", temporalUpdate_))
-    temporalUpdate_ = -1.0;
-  if(!private_nh_.getParam("resampleThreshold", resampleThreshold_))
-    resampleThreshold_ = 0.5;
-  if(!private_nh_.getParam("particles", particles_))
-    particles_ = 30;
-  if(!private_nh_.getParam("xmin", xmin_))
-    xmin_ = -100.0;
-  if(!private_nh_.getParam("ymin", ymin_))
-    ymin_ = -100.0;
-  if(!private_nh_.getParam("xmax", xmax_))
-    xmax_ = 100.0;
-  if(!private_nh_.getParam("ymax", ymax_))
-    ymax_ = 100.0;
-  if(!private_nh_.getParam("delta", delta_))
-    delta_ = 0.05;
-  if(!private_nh_.getParam("occ_thresh", occ_thresh_))
-    occ_thresh_ = 0.25;
-  if(!private_nh_.getParam("llsamplerange", llsamplerange_))
-    llsamplerange_ = 0.01;
-  if(!private_nh_.getParam("llsamplestep", llsamplestep_))
-    llsamplestep_ = 0.01;
-  if(!private_nh_.getParam("lasamplerange", lasamplerange_))
-    lasamplerange_ = 0.005;
-  if(!private_nh_.getParam("lasamplestep", lasamplestep_))
-    lasamplestep_ = 0.005;
-    
-  if(!private_nh_.getParam("tf_delay", tf_delay_))
-    tf_delay_ = transform_publish_period;
+  private_nh_.param("sigma", sigma_, 0.05);
+  private_nh_.param("kernelSize", kernelSize_, 1);
+  private_nh_.param("lstep", lstep_, 0.05);
+  private_nh_.param("astep", astep_, 0.05);
+  private_nh_.param("iterations", iterations_, 5);
+  private_nh_.param("lsigma", lsigma_, 0.075);
+  private_nh_.param("ogain", ogain_, 3.0);
+  private_nh_.param("lskip", lskip_, 0);
+  private_nh_.param("tf_delay", tf_delay_, transform_publish_period_);
+  private_nh_.param("srr", srr_, 0.1);
+  private_nh_.param("srt", srr_, 0.2);
+  private_nh_.param("str", srr_, 0.1);
+  private_nh_.param("stt", srr_, 0.2);
+  private_nh_.param("linearUpdate", linearUpdate_, 1.0);
+  private_nh_.param("angularUpdate", angularUpdate_, 0.5);
+  private_nh_.param("temporalUpdate", temporalUpdate_, -1.0);
+  private_nh_.param("resampleThreshold", resampleThreshold_, 0.5);
+  private_nh_.param("particles", particles_, 30);
+  private_nh_.param("xmin", xmin_, -100.0);
+  private_nh_.param("ymin", ymin_, -100.0);
+  private_nh_.param("xmax", xmax_, 100.0);
+  private_nh_.param("ymax", ymax_, 100.0);
+  private_nh_.param("delta", delta_, 0.05);
+  private_nh_.param("occ_thresh", occ_thresh_, 0.25);
+  private_nh_.param("llsamplerange", llsamplerange_, 0.01);
+  private_nh_.param("llsamplestep", llsamplestep_, 0.01);
+  private_nh_.param("lasamplerange", lasamplerange_, 0.005);
+  private_nh_.param("lasamplestep", lasamplestep_, 0.005);
+  //Parameters to be implemented likely...
+  //private_nh_.param("enlargeStep", enlargeStep_, 10.0);
+  //private_nh_.param("fullnessThreshold", fullnessThreshold_, 0.1);
+  //private_nh_.param("angularOdometryReliability", angularOdometryReliability_, 0.);
+  //private_nh_.param("linearOdometryReliability",  linearOdometryReliability_,  0.);
+  //private_nh_.param("freeCellRatio", freeCellRatio_, sqrt(2.));
+  //private_nh_.param("freeSpaceWeight", freesw_, 0.);
+  //private_nh_.param("IMU_yaw_default_cov",     IMU_yaw_default_cov, 1.4);
+  //private_nh_.param("GPS_available",           GPS_available,       false);
+  //private_nh_.param("GPS_initialization_wait", GPS_init_wait,       10.0);
+  //private_nh_.param("initialBeamsSkip", initialBeamsSkip_, 0);
 
+  srand48(rng_seed_); // Seed for the desired sequence of random numbers
+  map_update_interval_.fromSec(map_update_interval);
   entropy_publisher_ = private_nh_.advertise<std_msgs::Float64>("entropy", 1, true);
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
@@ -229,7 +204,7 @@ SlamGMapping::SlamGMapping():
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
 
-  transform_thread_ = new boost::thread(boost::bind(&SlamGMapping::publishLoop, this, transform_publish_period));
+  transform_thread_ = new boost::thread(boost::bind(&SlamGMapping::publishLoop, this, transform_publish_period_));
 }
 
 void SlamGMapping::publishLoop(double transform_publish_period){
@@ -322,7 +297,7 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
              e.what());
     return false;
   }
-  
+
   // gmapping doesnt take roll or pitch into account. So check for correct sensor alignment.
   if (fabs(fabs(up.z()) - 1) > 0.001)
   {
@@ -406,9 +381,6 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
   gsp_->setlasamplerange(lasamplerange_);
   gsp_->setlasamplestep(lasamplestep_);
 
-  // Call the sampling function once to set the seed.
-  GMapping::sampleGaussian(1,time(NULL));
-
   ROS_INFO("Initialization complete");
 
   return true;
@@ -419,7 +391,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 {
   if(!getOdomPose(gmap_pose, scan.header.stamp))
      return false;
-  
+
   if(scan.ranges.size() != gsp_laser_beam_count_)
     return false;
 
@@ -438,7 +410,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
       else
         ranges_double[i] = (double)scan.ranges[num_ranges - i - 1];
     }
-  } else 
+  } else
   {
     for(unsigned int i=0; i < scan.ranges.size(); i++)
     {
@@ -576,13 +548,13 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
     map_.map.info.origin.orientation.y = 0.0;
     map_.map.info.origin.orientation.z = 0.0;
     map_.map.info.origin.orientation.w = 1.0;
-  } 
+  }
 
   GMapping::Point center;
   center.x=(xmin_ + xmax_) / 2.0;
   center.y=(ymin_ + ymax_) / 2.0;
 
-  GMapping::ScanMatcherMap smap(center, xmin_, ymin_, xmax_, ymax_, 
+  GMapping::ScanMatcherMap smap(center, xmin_, ymin_, xmax_, ymax_,
                                 delta_);
 
   ROS_DEBUG("Trajectory tree:");
@@ -613,7 +585,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
     GMapping::Point wmax = smap.map2world(GMapping::IntPoint(smap.getMapSizeX(), smap.getMapSizeY()));
     xmin_ = wmin.x; ymin_ = wmin.y;
     xmax_ = wmax.x; ymax_ = wmax.y;
-    
+
     ROS_DEBUG("map size is now %dx%d pixels (%f,%f)-(%f, %f)", smap.getMapSizeX(), smap.getMapSizeY(),
               xmin_, ymin_, xmax_, ymax_);
 
@@ -655,7 +627,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   sstm_.publish(map_.map.info);
 }
 
-bool 
+bool
 SlamGMapping::mapCallback(nav_msgs::GetMap::Request  &req,
                           nav_msgs::GetMap::Response &res)
 {
