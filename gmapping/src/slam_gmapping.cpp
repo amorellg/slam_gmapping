@@ -200,6 +200,7 @@ SlamGMapping::SlamGMapping():
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamGMapping::mapCallback, this);
+  particlecloud_pub_ = node_.advertise<geometry_msgs::PoseArray>("particlecloud", 2);
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
@@ -465,6 +466,7 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
   if(addScan(*scan, odom_pose))
   {
     ROS_DEBUG("scan processed");
+    publishParticles();
 
     GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
     ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
@@ -647,4 +649,25 @@ void SlamGMapping::publishTransform()
   ros::Time tf_expiration = ros::Time::now() + ros::Duration(tf_delay_);
   tfB_->sendTransform( tf::StampedTransform (map_to_odom_, tf_expiration, map_frame_, odom_frame_));
   map_to_odom_mutex_.unlock();
+}
+
+void SlamGMapping::publishParticles() {
+    // Publish the particle cloud
+    GMapping::GridSlamProcessor::ParticleVector particles = gsp_->getParticles();
+    geometry_msgs::PoseArray cloud_msg;
+
+    cloud_msg.header.stamp = ros::Time::now();
+    cloud_msg.header.frame_id = map_frame_;
+    cloud_msg.poses.resize(particles.size());
+    for(size_t i=0; i<particles.size(); i++)
+    {
+        tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw( particles[i].pose.theta ),
+                                 tf::Vector3( particles[i].pose.x
+                                            ,particles[i].pose.y
+                                            ,0 )),
+                        cloud_msg.poses[i]);
+
+    }
+
+    particlecloud_pub_.publish(cloud_msg);
 }

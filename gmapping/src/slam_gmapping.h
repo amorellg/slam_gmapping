@@ -24,6 +24,7 @@
 #include "tf/transform_broadcaster.h"
 #include "message_filters/subscriber.h"
 #include "tf/message_filter.h"
+#include "geometry_msgs/PoseArray.h"
 
 #include "gmapping/gridfastslam/gridslamprocessor.h"
 #include "gmapping/sensor/sensor_base/sensor.h"
@@ -42,12 +43,14 @@ class SlamGMapping
     bool mapCallback(nav_msgs::GetMap::Request  &req,
                      nav_msgs::GetMap::Response &res);
     void publishLoop(double transform_publish_period);
+    void publishParticles();
 
   private:
     ros::NodeHandle node_;
     ros::Publisher entropy_publisher_;
     ros::Publisher sst_;
     ros::Publisher sstm_;
+    ros::Publisher particlecloud_pub_;  //to publish gridslamprocessor particles
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
     message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
