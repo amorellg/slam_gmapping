@@ -60,8 +60,6 @@ class SlamGMapping
     GMapping::GridSlamProcessor* gsp_;
     GMapping::OdometrySensor* gsp_odom_;
 
-    bool got_first_scan_;
-
     bool got_map_;
     nav_msgs::GetMap::Response map_;
 
@@ -89,7 +87,6 @@ class SlamGMapping
     // Parameters used by GMapping
     double maxRange_;
     double maxUrange_;
-    double maxrange_;
     double sigma_;
     int kernelSize_;
     double lstep_;

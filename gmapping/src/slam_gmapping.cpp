@@ -136,7 +136,6 @@ SlamGMapping::SlamGMapping():
 
   gsp_odom_ = NULL;
 
-  got_first_scan_ = false;
   got_map_ = false;
 
   ros::NodeHandle private_nh_("~");
@@ -535,21 +534,9 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   ROS_ASSERT(rangeSensor);
 
   GMapping::ScanMatcher matcher;
-  double* laser_angles = new double[scan.ranges.size()];
-  double theta = rangeSensor->getOrientation() * scan.angle_min;
-  for(unsigned int i=0; i<scan.ranges.size(); i++)
-  {
-    if (rangeSensor->getOrientation() < 0)
-        laser_angles[scan.ranges.size()-i-1]=theta;
-    else
-        laser_angles[i]=theta;
-    theta += rangeSensor->getAngleInc();
-  }
-
-  matcher.setLaserParameters(scan.ranges.size(), laser_angles,
-                             rangeSensor->getPose());
-
-  delete[] laser_angles;
+  matcher.setLaserParameters(scan.ranges.size()
+                            ,rangeSensor->getAngles()
+                            ,rangeSensor->getPose());
   matcher.setlaserMaxRange(maxRange_);
   matcher.setusableRange(maxUrange_);
   matcher.setgenerateMap(true);
@@ -671,7 +658,8 @@ void SlamGMapping::publishTransform()
   map_to_odom_mutex_.unlock();
 }
 
-void SlamGMapping::publishParticles() {
+void SlamGMapping::publishParticles()
+{
     // Publish the particle cloud
     GMapping::GridSlamProcessor::ParticleVector particles = gsp_->getParticles();
     geometry_msgs::PoseArray cloud_msg;
