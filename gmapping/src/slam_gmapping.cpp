@@ -134,8 +134,6 @@ SlamGMapping::SlamGMapping():
   tfB_ = new tf::TransformBroadcaster();
   ROS_ASSERT(tfB_);
 
-  gsp_laser_ = NULL;
-  gsp_laser_angle_increment_ = 0.0;
   gsp_odom_ = NULL;
 
   got_first_scan_ = false;
@@ -228,9 +226,12 @@ SlamGMapping::~SlamGMapping()
     delete transform_thread_;
   }
 
+  for (GMapping::SensorMap::iterator it = gsp_->m_sensors.begin(); it != gsp_->m_sensors.end(); it++)
+  {
+    std::cerr << __PRETTY_FUNCTION__ << ": Deleting sensor " << it->first << std::endl;
+    delete it->second;
+  }
   delete gsp_;
-  if(gsp_laser_)
-    delete gsp_laser_;
   if(gsp_odom_)
     delete gsp_odom_;
   if (scan_filter_)
@@ -286,6 +287,16 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
     return false;
   }
 
+//  double yaw = tf::getYaw(laser_pose.getRotation());
+//
+//  GMapping::OrientedPoint gmap_pose(laser_pose.getOrigin().x(),
+//                                    laser_pose.getOrigin().y(),
+//                                    yaw);
+//  ROS_DEBUG("laser's pose wrt base: %.3f %.3f %.3f",
+//            laser_pose.getOrigin().x(),
+//            laser_pose.getOrigin().y(),
+//            yaw);
+
   // create a point 1m above the laser position and transform it into the laser-frame
   tf::Vector3 v;
   v.setValue(0, 0, 1 + laser_pose.getOrigin().z());
@@ -323,10 +334,10 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
     ROS_INFO("Laser is mounted upside down.");
   }
 
-  angle_min_ = orientationFactor * scan.angle_min;
-  angle_max_ = orientationFactor * scan.angle_max;
-  gsp_laser_angle_increment_ = orientationFactor * scan.angle_increment;
-  ROS_DEBUG("Laser angles top down in laser-frame: min: %.3f max: %.3f inc: %.3f", angle_min_, angle_max_, gsp_laser_angle_increment_);
+  ROS_DEBUG("Laser angles top down in laser-frame: min: %.3f max: %.3f inc: %.3f"
+           ,orientationFactor * scan.angle_min
+           ,orientationFactor * scan.angle_max
+           ,orientationFactor * scan.angle_increment);
 
   GMapping::OrientedPoint gmap_pose(0, 0, 0);
 
@@ -334,9 +345,12 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
   // assumption that GMapping requires a positive angle increment.  If the
   // actual increment is negative, we'll swap the order of ranges before
   // feeding each scan to GMapping.
+
+  GMapping::RangeSensor*
   gsp_laser_ = new GMapping::RangeSensor(scan.header.frame_id,
                                          scan.ranges.size(),
-                                         fabs(gsp_laser_angle_increment_),
+                                         scan.angle_increment,
+                                         orientationFactor,
                                          gmap_pose,
                                          0.0,
                                          maxRange_);
@@ -388,8 +402,11 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
 bool
 SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose)
 {
-  //SI HACE FALTA, EXTRAER NUMERO DE BEAMS DE LA ESTRUCTURA
-  //RANGESENSOR EN m_sensors con find...
+  // Read rangeSensor from the SensorMap
+  GMapping::SensorMap::const_iterator laser_it=gsp_->m_sensors.find(scan.header.frame_id);
+  ROS_ASSERT(laser_it!=gsp_->m_sensors.end());
+  const GMapping::RangeSensor* rangeSensor=dynamic_cast<const GMapping::RangeSensor*>((laser_it->second));
+  ROS_ASSERT(rangeSensor);
 
   if(!getOdomPose(gmap_pose, scan.header.stamp, scan.header.frame_id))
      return false;
@@ -397,7 +414,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
   // GMapping wants an array of doubles...
   double* ranges_double = new double[scan.ranges.size()];
   // If the angle increment is negative, we have to invert the order of the readings.
-  if (gsp_laser_angle_increment_ < 0)
+  if (rangeSensor->getOrientation() < 0)
   {
     ROS_DEBUG("Inverting scan");
     int num_ranges = scan.ranges.size();
@@ -424,7 +441,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 
   GMapping::RangeReading reading(scan.ranges.size(),
                                  ranges_double,
-                                 gsp_laser_,
+                                 rangeSensor,
                                  scan.header.stamp.toSec());
 
   // ...but it deep copies them in RangeReading constructor, so we don't
@@ -510,20 +527,27 @@ void
 SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
 {
   boost::mutex::scoped_lock(map_mutex_);
+
+  // Read rangeSensor from the SensorMap
+  GMapping::SensorMap::const_iterator laser_it=gsp_->m_sensors.find(scan.header.frame_id);
+  ROS_ASSERT(laser_it!=gsp_->m_sensors.end());
+  const GMapping::RangeSensor* rangeSensor=dynamic_cast<const GMapping::RangeSensor*>((laser_it->second));
+  ROS_ASSERT(rangeSensor);
+
   GMapping::ScanMatcher matcher;
   double* laser_angles = new double[scan.ranges.size()];
-  double theta = angle_min_;
+  double theta = rangeSensor->getOrientation() * scan.angle_min;
   for(unsigned int i=0; i<scan.ranges.size(); i++)
   {
-    if (gsp_laser_angle_increment_ < 0)
+    if (rangeSensor->getOrientation() < 0)
         laser_angles[scan.ranges.size()-i-1]=theta;
     else
         laser_angles[i]=theta;
-    theta += gsp_laser_angle_increment_;
+    theta += rangeSensor->getAngleInc();
   }
 
   matcher.setLaserParameters(scan.ranges.size(), laser_angles,
-                             gsp_laser_->getPose());
+                             rangeSensor->getPose());
 
   delete[] laser_angles;
   matcher.setlaserMaxRange(maxRange_);
@@ -603,7 +627,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
       /// @todo Sort out the unknown vs. free vs. obstacle thresholding
       GMapping::IntPoint p(x, y);
       double occ=smmap.cell(p);
-      assert(occ <= 1.0);
+      ROS_ASSERT(occ <= 1.0);
       if(occ < 0)
         map_.map.data[MAP_IDX(map_.map.info.width, x, y)] = -1;
       else if(occ > occ_thresh_)
