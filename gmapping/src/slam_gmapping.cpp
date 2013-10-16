@@ -153,7 +153,6 @@ SlamGMapping::SlamGMapping():
   private_nh_.param("rng_seed", rng_seed_, int(time(NULL)));
 
   // Parameters used by GMapping itself
-  maxUrange_ = 0.0;  maxRange_ = 0.0; // preliminary default, will be set in initMapper()
   private_nh_.param("sigma", sigma_, 0.05);
   private_nh_.param("kernelSize", kernelSize_, 1);
   private_nh_.param("lstep", lstep_, 0.05);
@@ -182,6 +181,9 @@ SlamGMapping::SlamGMapping():
   private_nh_.param("llsamplestep", llsamplestep_, 0.01);
   private_nh_.param("lasamplerange", lasamplerange_, 0.005);
   private_nh_.param("lasamplestep", lasamplestep_, 0.005);
+  ROS_ASSERT_MSG(private_nh_.getParam("maxRange", maxRange_),
+                 "Range sensor maxRange parameter is required");
+  private_nh_.param("maxUrange", maxUrange_, maxRange_);
   //Parameters to be implemented likely...
   //private_nh_.param("enlargeStep", enlargeStep_, 10.0);
   //private_nh_.param("fullnessThreshold", fullnessThreshold_, 0.1);
@@ -238,11 +240,14 @@ SlamGMapping::~SlamGMapping()
 }
 
 bool
-SlamGMapping::getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t)
+SlamGMapping::getOdomPose( GMapping::OrientedPoint& gmap_pose
+                         , const ros::Time& t
+                         , const std::string& f
+                         )
 {
-  // Get the laser's pose
+  // Get the robot's pose
   tf::Stamped<tf::Pose> ident (tf::Transform(tf::createQuaternionFromRPY(0,0,0),
-                                           tf::Vector3(0,0,0)), t, laser_frame_);
+                                           tf::Vector3(0,0,0)), t, f);
   tf::Stamped<tf::Transform> odom_pose;
   try
   {
@@ -262,14 +267,13 @@ SlamGMapping::getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t
 }
 
 bool
-SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
+SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
 {
-  laser_frame_ = scan.header.frame_id;
   // Get the laser's pose, relative to base.
   tf::Stamped<tf::Pose> ident;
   tf::Stamped<tf::Transform> laser_pose;
   ident.setIdentity();
-  ident.frame_id_ = laser_frame_;
+  ident.frame_id_ = scan.header.frame_id;
   ident.stamp_ = scan.header.stamp;
   try
   {
@@ -289,7 +293,7 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
                                       base_frame_);
   try
   {
-    tf_.transformPoint(laser_frame_, up, up);
+    tf_.transformPoint(scan.header.frame_id, up, up);
     ROS_DEBUG("Z-Axis in sensor frame: %.3f", up.z());
   }
   catch(tf::TransformException& e)
@@ -306,8 +310,6 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
                  up.z());
     return false;
   }
-
-  gsp_laser_beam_count_ = scan.ranges.size();
 
   int orientationFactor;
   if (up.z() > 0)
@@ -328,42 +330,38 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
 
   GMapping::OrientedPoint gmap_pose(0, 0, 0);
 
-  // setting maxRange and maxUrange here so we can set a reasonable default
-  ros::NodeHandle private_nh_("~");
-  if(!private_nh_.getParam("maxRange", maxRange_))
-    maxRange_ = scan.range_max - 0.01;
-  if(!private_nh_.getParam("maxUrange", maxUrange_))
-    maxUrange_ = maxRange_;
-
-  // The laser must be called "FLASER".
   // We pass in the absolute value of the computed angle increment, on the
   // assumption that GMapping requires a positive angle increment.  If the
   // actual increment is negative, we'll swap the order of ranges before
   // feeding each scan to GMapping.
-  gsp_laser_ = new GMapping::RangeSensor("FLASER",
-                                         gsp_laser_beam_count_,
+  gsp_laser_ = new GMapping::RangeSensor(scan.header.frame_id,
+                                         scan.ranges.size(),
                                          fabs(gsp_laser_angle_increment_),
                                          gmap_pose,
                                          0.0,
                                          maxRange_);
   ROS_ASSERT(gsp_laser_);
 
-  GMapping::SensorMap smap;
-  smap.insert(make_pair(gsp_laser_->getName(), gsp_laser_));
-  gsp_->setSensorMap(smap);
+  gsp_->m_sensors.insert(make_pair(gsp_laser_->getName(), gsp_laser_));
+//  gsp_->setSensorMap(gsp_->m_sensors, scan.header.frame_id);
 
+
+//////////////////////////
+//MOVER ESTO A UNA INICIALIZACION
   gsp_odom_ = new GMapping::OdometrySensor(odom_frame_);
   ROS_ASSERT(gsp_odom_);
 
-
-  /// @todo Expose setting an initial pose
+//////////////////////////
+//INITIALPOSE NO MOLA AQUI
   GMapping::OrientedPoint initialPose;
-  if(!getOdomPose(initialPose, scan.header.stamp))
+  if(!getOdomPose(initialPose, scan.header.stamp, scan.header.frame_id))
   {
     ROS_WARN("Unable to determine inital pose of laser! Starting point will be set to zero.");
     initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
   }
 
+//////////////////////////
+//SACAR MAXURANGE Y MAXRANGE DE CADA LASER, Y PONER ESTA PARTE EN LA INICIALIZACION
   gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
                               kernelSize_, lstep_, astep_, iterations_,
                               lsigma_, ogain_, lskip_);
@@ -390,11 +388,11 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
 bool
 SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose)
 {
-  if(!getOdomPose(gmap_pose, scan.header.stamp))
-     return false;
+  //SI HACE FALTA, EXTRAER NUMERO DE BEAMS DE LA ESTRUCTURA
+  //RANGESENSOR EN m_sensors con find...
 
-  if(scan.ranges.size() != gsp_laser_beam_count_)
-    return false;
+  if(!getOdomPose(gmap_pose, scan.header.stamp, scan.header.frame_id))
+     return false;
 
   // GMapping wants an array of doubles...
   double* ranges_double = new double[scan.ranges.size()];
@@ -411,7 +409,8 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
       else
         ranges_double[i] = (double)scan.ranges[num_ranges - i - 1];
     }
-  } else
+  }
+  else
   {
     for(unsigned int i=0; i < scan.ranges.size(); i++)
     {
@@ -448,19 +447,16 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 void
 SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
+  // We can't initialize the mapper until we've got the first scan
+  if (gsp_->m_sensors.find(scan->header.frame_id) == gsp_->m_sensors.end())
+    if(!addRangeSensor(*scan))
+      return;
+
   laser_count_++;
   if ((laser_count_ % throttle_scans_) != 0)
     return;
 
   static ros::Time last_map_update(0,0);
-
-  // We can't initialize the mapper until we've got the first scan
-  if(!got_first_scan_)
-  {
-    if(!initMapper(*scan))
-      return;
-    got_first_scan_ = true;
-  }
 
   GMapping::OrientedPoint odom_pose;
   if(addScan(*scan, odom_pose))
@@ -556,7 +552,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   center.x=(xmin_ + xmax_) / 2.0;
   center.y=(ymin_ + ymax_) / 2.0;
 
-  GMapping::ScanMatcherMap smap(center, xmin_, ymin_, xmax_, ymax_,
+  GMapping::ScanMatcherMap smmap(center, xmin_, ymin_, xmax_, ymax_,
                                 delta_);
 
   ROS_DEBUG("Trajectory tree:");
@@ -574,25 +570,25 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
       continue;
     }
     matcher.invalidateActiveArea();
-    matcher.computeActiveArea(smap, n->pose, &((*n->reading)[0]));
-    matcher.registerScan(smap, n->pose, &((*n->reading)[0]));
+    matcher.computeActiveArea(smmap, n->pose, &((*n->reading)[0]));
+    matcher.registerScan(smmap, n->pose, &((*n->reading)[0]));
   }
 
   // the map may have expanded, so resize ros message as well
-  if(map_.map.info.width != (unsigned int) smap.getMapSizeX() || map_.map.info.height != (unsigned int) smap.getMapSizeY()) {
+  if(map_.map.info.width != (unsigned int) smmap.getMapSizeX() || map_.map.info.height != (unsigned int) smmap.getMapSizeY()) {
 
     // NOTE: The results of ScanMatcherMap::getSize() are different from the parameters given to the constructor
     //       so we must obtain the bounding box in a different way
-    GMapping::Point wmin = smap.map2world(GMapping::IntPoint(0, 0));
-    GMapping::Point wmax = smap.map2world(GMapping::IntPoint(smap.getMapSizeX(), smap.getMapSizeY()));
+    GMapping::Point wmin = smmap.map2world(GMapping::IntPoint(0, 0));
+    GMapping::Point wmax = smmap.map2world(GMapping::IntPoint(smmap.getMapSizeX(), smmap.getMapSizeY()));
     xmin_ = wmin.x; ymin_ = wmin.y;
     xmax_ = wmax.x; ymax_ = wmax.y;
 
-    ROS_DEBUG("map size is now %dx%d pixels (%f,%f)-(%f, %f)", smap.getMapSizeX(), smap.getMapSizeY(),
+    ROS_DEBUG("map size is now %dx%d pixels (%f,%f)-(%f, %f)", smmap.getMapSizeX(), smmap.getMapSizeY(),
               xmin_, ymin_, xmax_, ymax_);
 
-    map_.map.info.width = smap.getMapSizeX();
-    map_.map.info.height = smap.getMapSizeY();
+    map_.map.info.width = smmap.getMapSizeX();
+    map_.map.info.height = smmap.getMapSizeY();
     map_.map.info.origin.position.x = xmin_;
     map_.map.info.origin.position.y = ymin_;
     map_.map.data.resize(map_.map.info.width * map_.map.info.height);
@@ -600,13 +596,13 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
     ROS_DEBUG("map origin: (%f, %f)", map_.map.info.origin.position.x, map_.map.info.origin.position.y);
   }
 
-  for(int x=0; x < smap.getMapSizeX(); x++)
+  for(int x=0; x < smmap.getMapSizeX(); x++)
   {
-    for(int y=0; y < smap.getMapSizeY(); y++)
+    for(int y=0; y < smmap.getMapSizeY(); y++)
     {
       /// @todo Sort out the unknown vs. free vs. obstacle thresholding
       GMapping::IntPoint p(x, y);
-      double occ=smap.cell(p);
+      double occ=smmap.cell(p);
       assert(occ <= 1.0);
       if(occ < 0)
         map_.map.data[MAP_IDX(map_.map.info.width, x, y)] = -1;

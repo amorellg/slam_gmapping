@@ -62,7 +62,6 @@ class SlamGMapping
     double gsp_laser_angle_increment_;
     double angle_min_;
     double angle_max_;
-    unsigned int gsp_laser_beam_count_;
     GMapping::OdometrySensor* gsp_odom_;
 
     bool got_first_scan_;
@@ -86,8 +85,8 @@ class SlamGMapping
     std::string odom_frame_;
 
     void updateMap(const sensor_msgs::LaserScan& scan);
-    bool getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t);
-    bool initMapper(const sensor_msgs::LaserScan& scan);
+    bool getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t, const std::string& f);
+    bool addRangeSensor(const sensor_msgs::LaserScan& scan);
     bool addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose);
     double computePoseEntropy();
 
