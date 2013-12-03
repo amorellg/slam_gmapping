@@ -44,6 +44,7 @@ class SlamGMapping
                      nav_msgs::GetMap::Response &res);
     void publishLoop(double transform_publish_period);
     void publishParticles();
+    void publishParticlesLoop(double particles_publish_period);
 
   private:
     ros::NodeHandle node_;
@@ -72,6 +73,7 @@ class SlamGMapping
     int throttle_scans_;
 
     boost::thread* transform_thread_;
+    boost::thread* particles_thread_;
 
     std::string base_frame_;
     std::string laser_frame_;
@@ -115,6 +117,7 @@ class SlamGMapping
     double lasamplerange_;
     double lasamplestep_;
     double transform_publish_period_;
+    double particles_publish_period_;
     double map_update_interval;
     double tf_delay_;
     int rng_seed_;
