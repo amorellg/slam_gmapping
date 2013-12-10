@@ -126,15 +126,8 @@ SlamGMapping::SlamGMapping():
 {
   // log4cxx::Logger::getLogger(ROSCONSOLE_DEFAULT_NAME)->setLevel(ros::console::g_level_lookup[ros::console::levels::Debug]);
 
-  // The library is pretty chatty
-  //gsp_ = new GMapping::GridSlamProcessor(std::cerr);
-  gsp_ = new GMapping::GridSlamProcessor();
-  ROS_ASSERT(gsp_);
-
   tfB_ = new tf::TransformBroadcaster();
   ROS_ASSERT(tfB_);
-
-  gsp_odom_ = NULL;
 
   got_map_ = false;
 
@@ -147,7 +140,7 @@ SlamGMapping::SlamGMapping():
   private_nh_.param<std::string>("map_frame",  map_frame_,  "map");
   private_nh_.param<std::string>("odom_frame", odom_frame_, "odom");
   private_nh_.param("transform_publish_period", transform_publish_period_, .05);
-  private_nh_.param("particles_publish_period", transform_publish_period_, .2);
+  private_nh_.param("particles_publish_period", transform_publish_period_, .01);
   private_nh_.param("rng_seed", rng_seed_, int(time(NULL)));
 
   // Parameters used by GMapping itself
@@ -200,13 +193,69 @@ SlamGMapping::SlamGMapping():
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamGMapping::mapCallback, this);
-  particlecloud_pub_ = node_.advertise<geometry_msgs::PoseArray>("particlecloud", 2);
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
 
   transform_thread_ = new boost::thread(boost::bind(&SlamGMapping::publishLoop, this, transform_publish_period_));
-  particles_thread_ = new boost::thread(boost::bind(&SlamGMapping::publishParticlesLoop, this, particles_publish_period_));
+
+  // The library is pretty chatty
+  //gsp_ = new GMapping::GridSlamProcessor(std::cerr);
+  gsp_ = new GMapping::GridSlamProcessor(&node_, map_frame_);
+  ROS_ASSERT(gsp_);
+
+//  gsp_odom_ = new GMapping::OdometrySensor(odom_frame_);
+//  ROS_ASSERT(gsp_odom_);
+
+//INITIALPOSE NO MOLA AQUI
+////ros::Time wait_start = ros::Time::now();
+////ROS_WARN("entro");
+////while((ros::Time::now() - wait_start) < ros::Duration(10))
+////{
+////    if(tf_.waitForTransform(odom_frame_, base_frame_,
+////                            ros::Time::now() , ros::Duration(0.2)))
+////    {
+////      break;
+////    }
+////}
+////ROS_WARN("salgo");
+////scan.header.stamp = ros::Time::now();
+//  if(!getOdomPose(initialPose, scan.header.stamp, scan.header.frame_id))
+//  //if(!getOdomPose(initialPose, ros::Time().now(), base_frame_))
+//  {
+//    ROS_WARN("Unable to determine inital pose of laser! Starting point will be set to zero.");
+//    initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
+//  }
+
+  //FIXME initialPose con GPS si hay
+  GMapping::OrientedPoint initialPose;
+  initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
+
+//  if (!gsp_->m_isInit)
+//  {
+//SACAR MAXURANGE Y MAXRANGE DE CADA LASER ????
+    gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
+                                kernelSize_, lstep_, astep_, iterations_,
+                                lsigma_, ogain_, lskip_);
+
+    gsp_->setMotionModelParameters(srr_, srt_, str_, stt_);
+    gsp_->setUpdateDistances(linearUpdate_, angularUpdate_, resampleThreshold_);
+    //gsp_->setUpdatePeriod(temporalUpdate_);
+    gsp_->setllsamplerange(llsamplerange_);
+    gsp_->setllsamplestep(llsamplestep_);
+    /// @todo Check these calls; in the gmapping gui, they use
+    /// llsamplestep and llsamplerange intead of lasamplestep and
+    /// lasamplerange.  It was probably a typo, but who knows.
+    gsp_->setlasamplerange(lasamplerange_);
+    gsp_->setlasamplestep(lasamplestep_);
+
+    gsp_->setgenerateMap(false);
+    gsp_->GridSlamProcessor::init(particles_, xmin_, ymin_, xmax_, ymax_,
+                                  delta_, initialPose);
+    ROS_INFO("Initialization complete");
+//  }
+
+
 }
 
 void SlamGMapping::publishLoop(double transform_publish_period)
@@ -239,8 +288,8 @@ SlamGMapping::~SlamGMapping()
     delete it->second;
   }
   delete gsp_;
-  if(gsp_odom_)
-    delete gsp_odom_;
+//  if(gsp_odom_)
+//    delete gsp_odom_;
   if (scan_filter_)
     delete scan_filter_;
   if (scan_filter_sub_)
@@ -316,16 +365,18 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
   }
   catch(tf::TransformException& e)
   {
-    ROS_WARN("Unable to determine orientation of laser: %s",
-             e.what());
+    ROS_WARN( "Unable to determine orientation of range sensor %s : %s"
+            , scan.header.frame_id.c_str()
+            , e.what());
     return false;
   }
 
   // gmapping doesnt take roll or pitch into account. So check for correct sensor alignment.
   if (fabs(fabs(up.z()) - 1) > 0.001)
   {
-    ROS_WARN("Laser has to be mounted planar! Z-coordinate has to be 1 or -1, but gave: %.5f",
-                 up.z());
+    ROS_WARN( "Range sensor %s has to be mounted planar! Z-coordinate has to be 1 or -1, but gave: %.5f"
+            , scan.header.frame_id.c_str()
+            , up.z());
     return false;
   }
 
@@ -333,12 +384,12 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
   if (up.z() > 0)
   {
     orientationFactor = 1;
-    ROS_INFO("Laser is mounted upwards.");
+    ROS_INFO("Range sensor %s is mounted upwards.",scan.header.frame_id.c_str());
   }
   else
   {
     orientationFactor = -1;
-    ROS_INFO("Laser is mounted upside down.");
+    ROS_INFO("Range sensor %s is mounted upside down.",scan.header.frame_id.c_str());
   }
 
   ROS_DEBUG("Laser angles top down in laser-frame: min: %.3f max: %.3f inc: %.3f"
@@ -365,43 +416,6 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
 
   gsp_->m_sensors.insert(make_pair(gsp_laser_->getName(), gsp_laser_));
 //  gsp_->setSensorMap(gsp_->m_sensors, scan.header.frame_id);
-
-
-//////////////////////////
-//MOVER ESTO A UNA INICIALIZACION
-  gsp_odom_ = new GMapping::OdometrySensor(odom_frame_);
-  ROS_ASSERT(gsp_odom_);
-
-//////////////////////////
-//INITIALPOSE NO MOLA AQUI
-  GMapping::OrientedPoint initialPose;
-  if(!getOdomPose(initialPose, scan.header.stamp, scan.header.frame_id))
-  {
-    ROS_WARN("Unable to determine inital pose of laser! Starting point will be set to zero.");
-    initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
-  }
-
-//////////////////////////
-//SACAR MAXURANGE Y MAXRANGE DE CADA LASER, Y PONER ESTA PARTE EN LA INICIALIZACION
-  gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
-                              kernelSize_, lstep_, astep_, iterations_,
-                              lsigma_, ogain_, lskip_);
-
-  gsp_->setMotionModelParameters(srr_, srt_, str_, stt_);
-  gsp_->setUpdateDistances(linearUpdate_, angularUpdate_, resampleThreshold_);
-//  gsp_->setUpdatePeriod(temporalUpdate_);
-  gsp_->setgenerateMap(false);
-  gsp_->GridSlamProcessor::init(particles_, xmin_, ymin_, xmax_, ymax_,
-                                delta_, initialPose); ///////////////////////FIXME initialPose con GPS si hay
-  gsp_->setllsamplerange(llsamplerange_);
-  gsp_->setllsamplestep(llsamplestep_);
-  /// @todo Check these calls; in the gmapping gui, they use
-  /// llsamplestep and llsamplerange intead of lasamplestep and
-  /// lasamplerange.  It was probably a typo, but who knows.
-  gsp_->setlasamplerange(lasamplerange_);
-  gsp_->setlasamplestep(lasamplestep_);
-
-  ROS_INFO("Initialization complete");
 
   return true;
 }
@@ -486,7 +500,6 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
   if(addScan(*scan, odom_pose))
   {
     ROS_DEBUG("scan processed");
-    //publishParticles();
 
     GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
     ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
@@ -542,11 +555,11 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   ROS_ASSERT(rangeSensor);
 
   GMapping::ScanMatcher matcher;
-  matcher.setLaserParameters(scan.ranges.size()
-                            ,rangeSensor->getAngles()
-                            ,rangeSensor->getPose());
-  matcher.setlaserMaxRange(maxRange_);
-  matcher.setusableRange(maxUrange_);
+//  matcher.setLaserParameters(scan.ranges.size()
+//                            ,rangeSensor->getAngles()
+//                            ,rangeSensor->getPose());
+//  matcher.setlaserMaxRange(maxRange_);
+//  matcher.setusableRange(maxUrange_);
   matcher.setgenerateMap(true);
 
   GMapping::GridSlamProcessor::Particle best =
@@ -588,9 +601,13 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
       ROS_DEBUG("Reading is NULL");
       continue;
     }
+    matcher.setlaserMaxRange((*rangeSensor).getMaxRange());
+    matcher.setusableRange((*rangeSensor).getMaxRange()); //maxUrange_
     matcher.invalidateActiveArea();
-    matcher.computeActiveArea(smmap, n->pose, &((*n->reading)[0]));
-    matcher.registerScan(smmap, n->pose, &((*n->reading)[0]));
+    //matcher.computeActiveArea(smmap, n->pose, &((*n->reading)[0]));
+    //matcher.registerScan(smmap, n->pose, &((*n->reading)[0]));
+    matcher.computeActiveArea(smmap, n->pose, *(n->reading));
+    matcher.registerScan(smmap, n->pose, *(n->reading));
   }
 
   // the map may have expanded, so resize ros message as well
@@ -664,38 +681,4 @@ void SlamGMapping::publishTransform()
   ros::Time tf_expiration = ros::Time::now() + ros::Duration(tf_delay_);
   tfB_->sendTransform( tf::StampedTransform (map_to_odom_, tf_expiration, map_frame_, odom_frame_));
   map_to_odom_mutex_.unlock();
-}
-
-void SlamGMapping::publishParticles()
-{
-    // Publish the particle cloud
-    GMapping::GridSlamProcessor::ParticleVector particles = gsp_->getParticles();
-    geometry_msgs::PoseArray cloud_msg;
-
-    cloud_msg.header.stamp = ros::Time::now();
-    cloud_msg.header.frame_id = map_frame_;
-    cloud_msg.poses.resize(particles.size());
-    for(size_t i=0; i<particles.size(); i++)
-    {
-        tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw( particles[i].pose.theta ),
-                                 tf::Vector3( particles[i].pose.x
-                                            ,particles[i].pose.y
-                                            ,0 )),
-                        cloud_msg.poses[i]);
-
-    }
-
-    particlecloud_pub_.publish(cloud_msg);
-}
-
-void SlamGMapping::publishParticlesLoop(double particles_publish_period)
-{
-  if(particles_publish_period == 0 || !gsp_->m_isInit) //Publish only when particles are initialized
-    return;
-
-  ros::Rate r(1.0 / particles_publish_period);
-  while(ros::ok()){
-    publishParticles();
-    r.sleep();
-  }
 }
