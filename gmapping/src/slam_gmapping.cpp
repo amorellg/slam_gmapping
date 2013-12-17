@@ -234,25 +234,25 @@ SlamGMapping::SlamGMapping():
 //  if (!gsp_->m_isInit)
 //  {
 //SACAR MAXURANGE Y MAXRANGE DE CADA LASER ????
-    gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
-                                kernelSize_, lstep_, astep_, iterations_,
-                                lsigma_, ogain_, lskip_);
+  gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
+                              kernelSize_, lstep_, astep_, iterations_,
+                              lsigma_, ogain_, lskip_);
 
-    gsp_->setMotionModelParameters(srr_, srt_, str_, stt_);
-    gsp_->setUpdateDistances(linearUpdate_, angularUpdate_, resampleThreshold_);
-    //gsp_->setUpdatePeriod(temporalUpdate_);
-    gsp_->setllsamplerange(llsamplerange_);
-    gsp_->setllsamplestep(llsamplestep_);
-    /// @todo Check these calls; in the gmapping gui, they use
-    /// llsamplestep and llsamplerange intead of lasamplestep and
-    /// lasamplerange.  It was probably a typo, but who knows.
-    gsp_->setlasamplerange(lasamplerange_);
-    gsp_->setlasamplestep(lasamplestep_);
+  gsp_->setMotionModelParameters(srr_, srt_, str_, stt_);
+  gsp_->setUpdateDistances(linearUpdate_, angularUpdate_, resampleThreshold_);
+  //gsp_->setUpdatePeriod(temporalUpdate_);
+  gsp_->setllsamplerange(llsamplerange_);
+  gsp_->setllsamplestep(llsamplestep_);
+  /// @todo Check these calls; in the gmapping gui, they use
+  /// llsamplestep and llsamplerange intead of lasamplestep and
+  /// lasamplerange.  It was probably a typo, but who knows.
+  gsp_->setlasamplerange(lasamplerange_);
+  gsp_->setlasamplestep(lasamplestep_);
 
-    gsp_->setgenerateMap(false);
-    gsp_->GridSlamProcessor::init(particles_, xmin_, ymin_, xmax_, ymax_,
-                                  delta_, initialPose);
-    ROS_INFO("Initialization complete");
+  gsp_->setgenerateMap(false);
+  gsp_->GridSlamProcessor::init(particles_, xmin_, ymin_, xmax_, ymax_,
+                                delta_, initialPose);
+  ROS_INFO("Initialization complete");
 //  }
 
 
@@ -303,8 +303,12 @@ SlamGMapping::getOdomPose( GMapping::OrientedPoint& gmap_pose
                          )
 {
   // Get the robot's pose
-  tf::Stamped<tf::Pose> ident (tf::Transform(tf::createQuaternionFromRPY(0,0,0),
-                                           tf::Vector3(0,0,0)), t, f);
+  tf::Stamped<tf::Pose> ident ( tf::Transform( tf::createQuaternionFromRPY(0,0,0)
+                                             , tf::Vector3(0,0,0)
+                                             )
+                              , t
+                              , f
+                              );
   tf::Stamped<tf::Transform> odom_pose;
   try
   {
@@ -397,7 +401,18 @@ SlamGMapping::addRangeSensor(const sensor_msgs::LaserScan& scan)
            ,orientationFactor * scan.angle_max
            ,orientationFactor * scan.angle_increment);
 
-  GMapping::OrientedPoint gmap_pose(0, 0, 0);
+//  GMapping::OrientedPoint gmap_pose(0, 0, 0);
+  // Laser pose wrt base link
+  GMapping::OrientedPoint gmap_pose( laser_pose.getOrigin().x()
+                                   , laser_pose.getOrigin().y()
+                                   , tf::getYaw(laser_pose.getRotation())
+                                   );
+  ROS_DEBUG( "Range sensor %s pose wrt base: x= %.3f y= %.3f theta= %.3f."
+           , scan.header.frame_id.c_str()
+           , laser_pose.getOrigin().x()
+           , laser_pose.getOrigin().y()
+           , tf::getYaw(laser_pose.getRotation())
+           );
 
   // We pass in the absolute value of the computed angle increment, on the
   // assumption that GMapping requires a positive angle increment.  If the
@@ -429,7 +444,8 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
   const GMapping::RangeSensor* rangeSensor=dynamic_cast<const GMapping::RangeSensor*>((laser_it->second));
   ROS_ASSERT(rangeSensor);
 
-  if(!getOdomPose(gmap_pose, scan.header.stamp, scan.header.frame_id))
+  //if(!getOdomPose(gmap_pose, scan.header.stamp, scan.header.frame_id))
+  if(!getOdomPose(gmap_pose, scan.header.stamp, base_frame_))
      return false;
 
   // GMapping wants an array of doubles...
@@ -470,6 +486,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
   delete[] ranges_double;
 
   reading.setPose(gmap_pose);
+  //reading.setPose(rangeSensor->getPose());
 
   /*
   ROS_DEBUG("scanpose (%.3f): %.3f %.3f %.3f\n",
