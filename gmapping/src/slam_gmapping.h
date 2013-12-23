@@ -70,7 +70,6 @@ class SlamGMapping
     int throttle_scans_;
 
     boost::thread* transform_thread_;
-    boost::thread* particles_thread_;
 
     std::string base_frame_;
     std::string laser_frame_;

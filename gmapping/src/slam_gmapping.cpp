@@ -122,7 +122,7 @@ Initial map dimensions and resolution:
 
 SlamGMapping::SlamGMapping():
   map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0), transform_thread_(NULL), particles_thread_(NULL)
+  laser_count_(0), transform_thread_(NULL)
 {
   // log4cxx::Logger::getLogger(ROSCONSOLE_DEFAULT_NAME)->setLevel(ros::console::g_level_lookup[ros::console::levels::Debug]);
 
@@ -276,11 +276,6 @@ SlamGMapping::~SlamGMapping()
   {
     transform_thread_->join();
     delete transform_thread_;
-  }
-  if(particles_thread_)
-  {
-    particles_thread_->join();
-    delete particles_thread_;
   }
   for (GMapping::SensorMap::iterator it = gsp_->m_sensors.begin(); it != gsp_->m_sensors.end(); it++)
   {
